@@ -1,0 +1,9 @@
+[workspace]
+members = [
+    "crates/sensor-core",
+    "crates/sensor-redis",
+    "crates/sensor-sync",
+    "crates/sensor-election",
+    "crates/sensor-python",
+]
+resolver = "2"
