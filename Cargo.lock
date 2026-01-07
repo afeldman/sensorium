@@ -539,7 +539,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "approx",
+ "redis",
  "sensor-core",
+ "sensor-election",
  "sensor-redis",
  "serde",
 ]

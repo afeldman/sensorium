@@ -7,7 +7,7 @@ import json
 import time
 import redis
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 import random
 
 
@@ -20,12 +20,21 @@ class SyntheticSensor:
     jitter: float  # Standardabweichung des Messrauschens
 
 
-def simulate_observation(sensor: SyntheticSensor, true_global_time: float) -> dict:
+@dataclass
+class SimulationConfig:
+    ttl_seconds: int = 60
+    jitter_ms: float = 10.0
+    redis_url: str = "redis://127.0.0.1/"
+    node_id: str = "master-node"
+    heartbeat_ttl: int = 10
+
+
+def simulate_observation(sensor: SyntheticSensor, true_global_time: float, rng: random.Random) -> dict:
     """Simuliere eine Beobachtung mit Offset, Drift und Jitter."""
     # Inverse mapping: t_local = (t_global - offset) / drift
     t_local = (true_global_time - sensor.offset) / sensor.drift
     # Füge Jitter hinzu
-    t_local += random.gauss(0, sensor.jitter)
+    t_local += rng.gauss(0, sensor.jitter)
     
     return {
         "sensor_id": sensor.sensor_id,
@@ -36,14 +45,19 @@ def simulate_observation(sensor: SyntheticSensor, true_global_time: float) -> di
     }
 
 
-def main():
+def run_simulation(seed: int, config: SimulationConfig, sensors: Optional[List[SyntheticSensor]] = None):
+    """Deterministic simulation entry point. Seedable and reusable.
+
+    Returns: (groups, true_event_time)
+    """
+    rng = random.Random(seed)
+
     # Redis verbinden
-    r = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+    r = redis.Redis.from_url(config.redis_url, decode_responses=True)
     r.flushdb()
-    print("🗑️  Redis DB geflusht")
     
     # Definiere synthetische Sensoren
-    sensors = [
+    sensors = sensors or [
         SyntheticSensor("camera-1", "camera", offset=0.05, drift=1.0001, jitter=0.01),
         SyntheticSensor("imu-1", "imu", offset=-0.02, drift=0.9999, jitter=0.02),
         SyntheticSensor("mic-1", "microphone", offset=0.01, drift=1.0, jitter=0.005),
@@ -51,17 +65,15 @@ def main():
     
     # Simuliere ein Ereignis zur Zeit t=10.0
     true_event_time = 10.0
-    print(f"\n📡 Simuliere Ereignis zur globalen Zeit t={true_event_time}")
     
     observations = []
     for sensor in sensors:
-        obs = simulate_observation(sensor, true_event_time)
+        obs = simulate_observation(sensor, true_event_time, rng)
         observations.append(obs)
         
         # Schreibe in Redis
         key = f"obs:{obs['sensor_id']}:{int(obs['t_local']*1e9)}"
-        r.setex(key, 60, json.dumps(obs))
-        print(f"  ✓ {sensor.sensor_id}: t_local={obs['t_local']:.6f}s, σ={obs['sigma']}")
+        r.setex(key, config.ttl_seconds, json.dumps(obs))
     
     # Schreibe TimeSyncState für jeden Sensor (initialwerte)
     for sensor in sensors:
@@ -73,25 +85,39 @@ def main():
         key = f"sync:state:{sensor.sensor_id}"
         r.set(key, json.dumps(state))
     
-    print("\n⏳ Warte kurz, dann importiere sensorium...")
-    time.sleep(0.5)
-    
     # Importiere Python-Bindings
-    try:
-        from sensorium import SyncEngine
-    except ImportError:
-        print("❌ sensorium nicht gefunden. Bitte zuerst ausführen:")
-        print("   maturin develop")
-        return
+    from sensorium import SyncEngine
     
     # Erstelle SyncEngine
-    engine = SyncEngine("redis://127.0.0.1/", "master-node", 10)
-    print("🚀 SyncEngine initialisiert")
+    engine = SyncEngine(config.redis_url, config.node_id, config.heartbeat_ttl)
     
     # Führe Synchronisationsschritt aus
     groups = engine.step()
-    
-    print(f"\n✨ Synchronisierung abgeschlossen: {len(groups)} Gruppe(n)")
+    return groups, true_event_time
+
+
+def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Deterministic synthetic sensor simulation")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
+    parser.add_argument("--redis-url", default="redis://127.0.0.1/", help="Redis connection URL")
+    parser.add_argument("--node-id", default="master-node", help="Node ID for election")
+    parser.add_argument("--ttl", type=int, default=60, help="TTL seconds for observations")
+    parser.add_argument("--jitter-ms", type=float, default=10.0, help="Uniform jitter (+/- ms) for seeding")
+
+    args = parser.parse_args()
+
+    cfg = SimulationConfig(
+        ttl_seconds=args.ttl,
+        jitter_ms=args.jitter_ms,
+        redis_url=args.redis_url,
+        node_id=args.node_id,
+    )
+
+    groups, true_event_time = run_simulation(args.seed, cfg)
+
+    print(f"✨ Synchronisierung abgeschlossen: {len(groups)} Gruppe(n)")
     for i, group in enumerate(groups):
         print(f"\n  Gruppe {i+1}:")
         print(f"    t_global: {group['t_global']:.6f}s (Wahrer Wert: {true_event_time:.6f}s)")

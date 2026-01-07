@@ -85,6 +85,14 @@ for group in groups:
 python examples/synthetic_sensors.py
 ```
 
+### Example: Minimal deterministic experiment
+
+```bash
+python examples/minimal_experiment.py --redis-url redis://127.0.0.1/ --node-id node-a --seed 42
+```
+
+Returns a single time slice with normalized membership probabilities. Deterministic for fixed seeds.
+
 ### CLI Tool
 
 ```bash

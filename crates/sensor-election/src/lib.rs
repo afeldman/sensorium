@@ -92,4 +92,25 @@ mod tests {
         assert!(is_master(&mut con, "node-3").unwrap());
         assert!(!is_master(&mut con, "node-2").unwrap());
     }
+
+    #[test]
+    #[ignore]
+    fn master_failure_and_recovery() {
+        flush();
+        let mut con = get_con();
+
+        // Initial heartbeats: node-1, node-2 → master = node-2
+        send_heartbeat(&mut con, "node-1", 10).unwrap();
+        send_heartbeat(&mut con, "node-2", 10).unwrap();
+        assert_eq!(current_master(&mut con).unwrap().as_deref(), Some("node-2"));
+
+        // Simuliere Ausfall von node-2 (Heartbeat löschen)
+        redis::cmd("DEL").arg(heartbeat_key("node-2")).execute(&mut con);
+        assert_eq!(current_master(&mut con).unwrap().as_deref(), Some("node-1"));
+
+        // Recovery: node-3 kommt hoch und übernimmt als höchster Node
+        send_heartbeat(&mut con, "node-3", 10).unwrap();
+        assert_eq!(current_master(&mut con).unwrap().as_deref(), Some("node-3"));
+        assert!(is_master(&mut con, "node-3").unwrap());
+    }
 }
