@@ -40,9 +40,54 @@ impl From<&TimeSyncState> for TimeOffsetModel {
     }
 }
 
+impl TimeOffsetModel {
+    /// Erstelle ein neues Zeit-Offset-Modell mit Standardwerten.
+    pub fn new() -> Self {
+        Self {
+            offset_mean: 0.0,
+            offset_var: 0.1,
+            drift: 1.0,
+        }
+    }
+
+    /// Vorhersage der globalen Zeit aus lokaler Zeit.
+    pub fn predict_global_time(&self, t_local: f64) -> f64 {
+        self.offset_mean + self.drift * t_local
+    }
+
+    /// Kalman-Update mit einer neuen Beobachtung.
+    /// Vereinfachtes 1D-Kalman-Filter für Offset-Schätzung.
+    /// `t_local`: lokaler Zeitstempel, `t_global_measured`: gemessene globale Zeit, `measurement_var`: Messunsicherheit
+    pub fn update_with_observation(&mut self, t_local: f64, t_global_measured: f64, measurement_var: f64) {
+        // Predicted global time
+        let t_pred = self.predict_global_time(t_local);
+        // Innovation (Residuum)
+        let innovation = t_global_measured - t_pred;
+        // Innovation variance
+        let s = self.offset_var + measurement_var;
+        if s <= 0.0 {
+            return; // Keine Update möglich
+        }
+        // Kalman gain
+        let k = self.offset_var / s;
+        // Update mean
+        self.offset_mean += k * innovation;
+        // Update variance
+        self.offset_var = (1.0 - k) * self.offset_var;
+        // Bound variance to avoid collapse
+        self.offset_var = self.offset_var.max(1e-6);
+    }
+}
+
+impl Default for TimeOffsetModel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Lokale Zeit in globale Zeit abbilden: t_global = offset + drift * t_local
 pub fn to_global_time(t_local: f64, model: &TimeOffsetModel) -> f64 {
-    model.offset_mean + model.drift * t_local
+    model.predict_global_time(t_local)
 }
 
 /// Effektive Varianz einer Beobachtung im globalen Zeitrahmen.
@@ -159,5 +204,17 @@ mod tests {
         assert_eq!(group.members.len(), 3);
         let sum_p: f64 = group.members.iter().map(|m| m.probability).sum();
         assert!((sum_p - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn kalman_update_converges() {
+        let mut model = TimeOffsetModel::new();
+        // Simuliere mehrere Messungen mit konstantem Offset 0.5
+        for _ in 0..10 {
+            model.update_with_observation(10.0, 10.5, 0.01);
+        }
+        // Offset sollte gegen 0.5 konvergieren
+        assert!((model.offset_mean - 0.5).abs() < 0.1);
+        assert!(model.offset_var < 0.1);
     }
 }

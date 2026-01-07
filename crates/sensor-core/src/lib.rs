@@ -45,6 +45,15 @@ impl SensorObservation for Observation {
     }
 }
 
+impl Observation {
+    /// Berechne Bucket-ID für Zeitfenster-basierte Gruppierung.
+    /// bucket_size_ms: Bucket-Größe in Millisekunden
+    pub fn bucket_id(&self, bucket_size_ms: u64) -> u64 {
+        let t_ms = (self.local_timestamp * 1000.0) as u64;
+        t_ms / bucket_size_ms
+    }
+}
+
 /// Calculates the likelihood of an observation given a time difference and variance.
 ///
 /// # Examples
@@ -96,5 +105,18 @@ mod tests {
     fn likelihood_handles_nonpositive_variance() {
         assert_eq!(likelihood(0.0, 0.0), 0.0);
         assert_eq!(likelihood(1.0, -1.0), 0.0);
+    }
+
+    #[test]
+    fn bucket_id_computation() {
+        let obs = Observation {
+            sensor_id: "s1".into(),
+            sensor_type: "cam".into(),
+            local_timestamp: 10.5,  // 10500 ms
+            payload: vec![],
+            covariance: 0.1,
+        };
+        assert_eq!(obs.bucket_id(1000), 10);  // 10500 / 1000 = 10
+        assert_eq!(obs.bucket_id(100), 105);  // 10500 / 100 = 105
     }
 }
