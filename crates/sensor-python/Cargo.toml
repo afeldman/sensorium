@@ -9,3 +9,9 @@ crate-type = ["cdylib"]
 
 [dependencies]
 pyo3 = { version = "0.27.2", features = ["extension-module"] }
+anyhow = "1.0"
+redis = { version = "0.25.4" }
+sensor-core = { path = "../sensor-core" }
+sensor-redis = { path = "../sensor-redis" }
+sensor-sync = { path = "../sensor-sync" }
+sensor-election = { path = "../sensor-election" }
